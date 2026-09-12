@@ -251,6 +251,38 @@ def scenario_graph_only_not_coverage():
     return jd, ranked
 
 
+def scenario_counterfactual():
+    """Test E: rank #6 lacks MongoDB (no evidence) and REST API (graph-only),
+    plus a weak Node.js mention. Needs exactly the two big fixes to reach Top 3."""
+    jd = make_jd([
+        make_requirement("req_react", "react", "React"),
+        make_requirement("req_node", "node.js", "Node.js"),
+        make_requirement("req_mongo", "mongodb", "MongoDB"),
+        make_requirement("req_rest", "rest api", "REST API"),
+    ])
+    c1 = make_candidate("Q1", "Top Tom", scores=compute_scores(90, 88, 85, 80))
+    c2 = make_candidate("Q2", "Second Sue", scores=compute_scores(85, 85, 80, 75))
+    c3 = make_candidate("Q3", "Third Ted", scores=compute_scores(76, 76, 70, 60))
+    c4 = make_candidate("Q4", "Fourth Fran", scores=compute_scores(70, 68, 62, 55))
+    c5 = make_candidate("Q5", "Fifth Fred", scores=compute_scores(65, 62, 58, 50))
+    c6 = make_candidate(
+        "Q6", "Sixth Sam",
+        matches=[
+            make_match("req_react", "react", keyword_match=True, matched=True,
+                       evidence_strength=1.0, evidence_type="project"),
+            make_match("req_node", "node.js", keyword_match=True, matched=True,
+                       evidence_strength=0.6, evidence_type="project"),
+            make_match("req_mongo", "mongodb", matched=False),
+            make_match("req_rest", "rest api", matched=False, graph_match=True,
+                       graph_path=["node.js", "express", "rest api"], graph_score=76.5),
+        ],
+        detected_skills=["react", "node.js"],
+        scores=compute_scores(70, 50, 40, 69.1),
+    )
+    ranked = rank_candidates([c1, c2, c3, c4, c5, c6])
+    return jd, ranked
+
+
 SENIOR_RESUME_EXPERIENCE = (
     "Professional Experience\n"
     "Senior Software Engineer, Acme Corp (2019-2023)\n"

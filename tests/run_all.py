@@ -4,8 +4,8 @@ Run from the repository root:
 
     python tests/run_all.py
 
-Covers TEAMMATE_2_TRUST_AND_INNOVATION.md #21 scenarios A, B, C, D, F (E
-belongs to the counterfactual module, built later at integration time).
+Covers TEAMMATE_2_TRUST_AND_INNOVATION.md #21 scenarios A, B, C, D, E, F plus
+contract-shape, serialization, graceful-degradation, and no-network checks.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 
 import fixtures as fx  # noqa: E402
 
+from src.counterfactual import generate_counterfactual  # noqa: E402
 from src.critique import critique_ranking  # noqa: E402
 from src.overqualification import flag_overqualification  # noqa: E402
 from src.probes import MAX_PROBES, generate_interview_probes  # noqa: E402
@@ -260,16 +261,217 @@ def test_team_insufficient_candidates():
 
 
 # ---------------------------------------------------------------------------
+# Counterfactual / coaching
+# ---------------------------------------------------------------------------
+
+def test_counterfactual_minimal_set_to_top3():
+    """Test E (TEAMMATE_2 #21): rank #6 needs exactly MongoDB + REST API."""
+    jd, ranked = fx.scenario_counterfactual()
+    c6 = ranked[-1]
+    assert c6["rank"] == 6
+    result = generate_counterfactual(c6, ranked, jd)
+
+    assert result["target_rank"] == 3
+    close(result["target_score"], ranked[2]["scores"]["final_score"])
+    assert [i["requirement"] for i in result["suggested_improvements"]] == ["MongoDB", "REST API"]
+    assert all(i["estimated_gain"] > 0 for i in result["suggested_improvements"])
+    assert result["reached_target"] is True
+    assert result["projected_score"] >= result["target_score"] + 0.1 - 1e-6
+    # Schema-required keys present; extras allowed (TEAMMATE_2 #13).
+    assert {"target_rank", "target_score", "suggested_improvements", "projected_score"} <= set(result)
+    # Simulation must not mutate the real candidate data.
+    mongo = next(m for m in c6["requirement_matches"] if m["requirement_id"] == "req_mongo")
+    assert mongo["matched"] is False
+    assert "[simulated]" not in str(mongo.get("evidence_text", ""))
+    assert "simulat" in result["disclaimer"].lower()
+    assert c6["counterfactual"] is result
+    json.dumps(result)
+
+
+def test_counterfactual_gains_match_documented_formula():
+    """Exact expected values under the 0.45/0.35/0.15/0.05 blend:
+    mongo add = 8.75 + 3.75 + 1.25 = 13.75; rest promote keeps its 76.5 graph
+    effective so only kw+ev+partial graph apply (8.75 + 3.75 + 0.29375)."""
+    jd, ranked = fx.scenario_counterfactual()
+    c6 = ranked[-1]
+    result = generate_counterfactual(c6, ranked, jd)
+    mongo, rest = result["suggested_improvements"]
+    close(mongo["estimated_gain"], 13.75)
+    close(rest["estimated_gain"], 12.79375, tol=0.01)
+    projected_expected = c6["scores"]["final_score"] + mongo["estimated_gain"] + rest["estimated_gain"]
+    close(result["projected_score"], projected_expected)
+
+
+def test_counterfactual_top3_candidate_targets_one_up():
+    jd, ranked = fx.scenario_counterfactual()
+    c2 = ranked[1]
+    result = generate_counterfactual(c2, ranked, jd)
+    assert result["already_in_top_3"] is True
+    assert result["target_rank"] == 1
+    assert result["reached_target"] is True
+    assert len(result["suggested_improvements"]) == 1  # +13.75 clears 88.15
+
+
+def test_counterfactual_rank_one_has_no_target():
+    jd, ranked = fx.scenario_counterfactual()
+    c1 = ranked[0]
+    result = generate_counterfactual(c1, ranked, jd)
+    assert result["suggested_improvements"] == []
+    assert "already ranks #1" in result["message"]
+
+
+def test_counterfactual_penalty_held_constant():
+    """Projected final must reuse the candidate's stored base-penalty gap."""
+    jd = fx.make_jd([
+        fx.make_requirement("req_react", "react", "React"),
+        fx.make_requirement("req_docker", "docker", "Docker"),
+    ])
+    cand = fx.make_candidate("QP", "Penalized Pat", matches=[
+        fx.make_match("req_react", "react", keyword_match=True, matched=True,
+                      evidence_strength=1.0, evidence_type="project"),
+        fx.make_match("req_docker", "docker", matched=False),
+    ], scores={"semantic": 60.0, "keyword": 50.0, "evidence": 50.0, "graph": 50.0,
+               "base_score": 60.0, "final_score": 55.0})  # 5-pt penalty
+
+    def rival(cid, name, final):
+        return fx.make_candidate(cid, name, scores={
+            "semantic": final, "keyword": final, "evidence": final, "graph": final,
+            "base_score": final, "final_score": final,
+        })
+
+    best, other, target_rival = rival("QT", "Best", 90.0), rival("QS", "Other", 80.0), rival("QR", "Rival", 70.0)
+    ranked = [best, other, target_rival, cand]
+    for i, c in enumerate(ranked, start=1):
+        c["rank"] = i
+    result = generate_counterfactual(cand, ranked, jd)
+    # gains: kw +50*.35=17.5, ev +50*.15=7.5, graph +50*.05=2.5 => 27.5
+    # projected = base 60 + 27.5 - 5 penalty = 82.5
+    close(result["suggested_improvements"][0]["estimated_gain"], 27.5)
+    close(result["projected_score"], 82.5)
+    assert result["reached_target"] is True
+
+
+def test_counterfactual_injected_scorer_backend():
+    """The integration seam: a real (here fake) scorer replaces the model."""
+    jd = fx.make_jd([fx.make_requirement(f"r{i}", f"s{i}", f"S{i}") for i in range(4)])
+
+    def fake_scorer(jd_, candidate_):
+        n = sum(1 for m in candidate_.get("requirement_matches", []) if m.get("matched"))
+        return {"base_score": 50.0 + 10.0 * n}
+
+    cand = fx.make_candidate("QI", "Injected Ida", matches=[
+        fx.make_match("r0", "s0", keyword_match=True, matched=True, evidence_strength=1.0),
+        fx.make_match("r1", "s1", keyword_match=True, matched=True, evidence_strength=1.0),
+        fx.make_match("r2", "s2", matched=False),
+        fx.make_match("r3", "s3", matched=False),
+    ], scores={"semantic": 0.0, "keyword": 0.0, "evidence": 0.0, "graph": 0.0,
+               "base_score": 70.0, "final_score": 70.0})
+    ranked = [
+        fx.make_candidate("A", "A", scores={"base_score": 0.0, "final_score": 90.0,
+                                            "semantic": 0, "keyword": 0, "evidence": 0, "graph": 0}),
+        fx.make_candidate("B", "B", scores={"base_score": 0.0, "final_score": 80.0,
+                                            "semantic": 0, "keyword": 0, "evidence": 0, "graph": 0}),
+        fx.make_candidate("C", "C", scores={"base_score": 0.0, "final_score": 75.0,
+                                            "semantic": 0, "keyword": 0, "evidence": 0, "graph": 0}),
+        cand,
+    ]
+    for i, c in enumerate(ranked, start=1):
+        c["rank"] = i
+    result = generate_counterfactual(cand, ranked, jd, scorer=fake_scorer)
+    assert result["scorer_backend"] == "injected-scorer"
+    close(result["suggested_improvements"][0]["estimated_gain"], 10.0)  # fake: +10 per match
+    close(result["projected_score"], 80.0)
+    assert result["reached_target"] is True
+
+
+def test_counterfactual_gap_too_large_reports_honestly():
+    jd, ranked = fx.scenario_counterfactual()
+    ranked[2]["scores"]["final_score"] = 150.0  # impossible target
+    c6 = ranked[-1]
+    result = generate_counterfactual(c6, ranked, jd)
+    assert result["reached_target"] is False
+    assert len(result["suggested_improvements"]) == 3  # capped at MAX_IMPROVEMENTS
+    assert "would not reach" in result["message"]
+
+
+def test_counterfactual_survives_sparse_schema():
+    bare = {"candidate_id": "Z", "name": "Zed"}
+    result = generate_counterfactual(bare, [], {})
+    assert {"target_rank", "target_score", "suggested_improvements", "projected_score"} <= set(result)
+    assert result["suggested_improvements"] == []
+    assert bare["counterfactual"] is result
+    json.dumps(result)
+
+
+# ---------------------------------------------------------------------------
 # Whole-module guardrails
 # ---------------------------------------------------------------------------
 
 def test_no_network_capable_imports():
     banned = ("import requests", "import urllib", "import socket", "import http",
               "urllib.request", "http.client", "openai", "google.generativeai")
-    for module in ("skill_graph", "critique", "overqualification", "probes", "team_mode"):
+    for module in ("skill_graph", "critique", "overqualification", "probes",
+                   "team_mode", "counterfactual"):
         source = (ROOT / "src" / f"{module}.py").read_text(encoding="utf-8")
         for needle in banned:
             assert needle not in source, f"{module}.py contains forbidden reference: {needle}"
+
+
+# ---------------------------------------------------------------------------
+# End-to-end trust pipeline (integration rehearsal, docs #20 order)
+# ---------------------------------------------------------------------------
+
+def test_full_teammate2_pipeline_order():
+    """Run every Teammate 2 module in the documented integration sequence on
+    one batch and verify the fully enriched schema survives a JSON round trip.
+
+    Order (TEAMMATE_2 #20): graph -> critique -> counterfactual ->
+    overqualification -> probes -> team mode.
+    """
+    jd, ranked = fx.scenario_counterfactual()
+    graph = load_skill_graph()
+
+    for candidate in ranked:
+        apply_skill_graph(jd, candidate, graph)
+        flag_overqualification(jd, candidate)
+        generate_interview_probes(jd, candidate)
+
+    critique_ranking(jd, ranked)
+    for candidate in ranked:
+        generate_counterfactual(candidate, ranked, jd)
+
+    # 1. Every candidate carries the four UI-exposed enrichment blocks.
+    for candidate in ranked:
+        assert set(candidate["critique"]) == {
+            "confidence", "flags", "summary", "human_review_recommended",
+        }
+        assert {"target_rank", "target_score", "suggested_improvements",
+                "projected_score"} <= set(candidate["counterfactual"])
+        assert set(candidate["overqualification"]) == {"flag", "reasons"}
+        assert isinstance(candidate["interview_probes"], list)
+        assert len(candidate["interview_probes"]) <= MAX_PROBES
+
+    # 2. Graph fields exist on every considered requirement match.
+    for candidate in ranked:
+        for entry in candidate["requirement_matches"]:
+            assert {"graph_match", "graph_path", "graph_score"} <= set(entry)
+
+    # 3. The graph actually helps the Express kid: Q6's REST API requirement
+    #    gets indirect support, and the counterfactual then offers to promote it.
+    q6 = ranked[-1]
+    rest = next(m for m in q6["requirement_matches"] if m["requirement_id"] == "req_rest")
+    assert rest["graph_match"] is True or rest["keyword_match"] is True
+    improve_ids = {i["requirement"] for i in q6["counterfactual"]["suggested_improvements"]}
+    assert "MongoDB" in improve_ids  # missing must be on the coaching list
+
+    # 4. Team mode consumes the enriched batch and returns a valid trio.
+    team = find_best_team(jd, ranked, team_size=3)
+    assert len(team["members"]) == 3
+    assert set(team["members"]) <= {c["candidate_id"] for c in ranked}
+
+    # 5. Serializable for results/latest_results.json + UI.
+    restored = json.loads(json.dumps({"jd": jd, "ranked_candidates": ranked, "team": team}))
+    assert restored["team"]["members"] == team["members"]
 
 
 def main() -> int:
