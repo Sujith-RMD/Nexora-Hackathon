@@ -174,20 +174,40 @@ def _ranking_rows(candidates: list[dict]) -> list[dict]:
 
 
 def _render_evidence(requirement_matches) -> None:
-	"""Show available evidence snippets without creating or inferring evidence."""
-	evidence_rows = []
+	"""Show structured requirement matches and any supplied evidence."""
+	requirement_rows = []
 	for item in _requirement_items(requirement_matches):
 		if not isinstance(item, dict):
 			continue
-		evidence = item.get("evidence_text") or item.get("evidence") or item.get("snippet")
-		if evidence:
-			requirement = item.get("requirement") or item.get("skill") or "Requirement"
-			evidence_rows.append({"Requirement": requirement, "Evidence": evidence})
+		requirement = item.get("requirement")
+		if requirement is None:
+			requirement = item.get("skill")
+		if requirement is None:
+			requirement = item.get("name")
+		matched = item.get("matched")
+		if matched is None:
+			matched = item.get("is_matched")
+		strength = item.get("evidence_strength")
+		if strength is None:
+			strength = item.get("strength")
+		evidence = item.get("evidence_text")
+		if evidence is None:
+			evidence = item.get("evidence")
+		if evidence is None:
+			evidence = item.get("snippet")
+		requirement_rows.append(
+			{
+				"Requirement / skill": _as_display_text(requirement),
+				"Matched": _as_display_text(matched),
+				"Evidence strength": _as_display_text(strength),
+				"Evidence snippet": _as_display_text(evidence),
+			}
+		)
 
-	if evidence_rows:
-		st.dataframe(evidence_rows, use_container_width=True, hide_index=True)
+	if requirement_rows:
+		st.dataframe(requirement_rows, use_container_width=True, hide_index=True)
 	else:
-		st.caption("Evidence not available.")
+		st.caption("Not available")
 
 
 def render_candidate_detail(candidate: dict) -> None:
@@ -215,11 +235,9 @@ def render_candidate_detail(candidate: dict) -> None:
 		hide_index=True,
 	)
 
-	st.markdown("#### Matched requirements")
-	matched_requirements = candidate.get("requirement_matches") or candidate.get("matched_skills")
-	st.write(_as_display_text(matched_requirements))
-	st.markdown("#### Evidence snippets")
-	_render_evidence(candidate.get("requirement_matches"))
+	st.markdown("#### Requirement evidence")
+	matched_requirements = candidate.get("requirement_matches")
+	_render_evidence(matched_requirements)
 	st.markdown("#### Missing requirements")
 	st.write(_as_display_text(candidate.get("missing_skills")))
 
