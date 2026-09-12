@@ -64,14 +64,198 @@ def render_empty_state(message: str) -> None:
 	st.info(message)
 
 
-def render_ranking_tab() -> None:
-	"""Render the ranking workspace without manufacturing candidate results."""
-	if st.session_state["ranked_candidates"]:
-		st.info("Ranked candidates will appear here when the analysis pipeline is connected.")
+def _as_display_text(value, fallback: str = "Not available") -> str:
+	"""Convert optional structured values into readable UI text."""
+	if value is None or value == "":
+		return fallback
+	if isinstance(value, (list, tuple, set)):
+		return ", ".join(str(item) for item in value) if value else fallback
+	if isinstance(value, dict):
+		return "; ".join(f"{key}: {item}" for key, item in value.items())
+	return str(value)
+
+
+def _candidate_confidence(candidate: dict) -> str:
+	"""Read an existing confidence value without deriving one."""
+	confidence = candidate.get("confidence")
+	critique = candidate.get("critique")
+	if confidence is None and isinstance(critique, dict):
+		confidence = critique.get("confidence")
+	return _as_display_text(confidence)
+
+
+def _role_level_mismatch(candidate: dict) -> str:
+	"""Render the existing overqualification assessment, if present."""
+	overqualification = candidate.get("overqualification")
+	if overqualification is None:
+		return "Not assessed"
+	if isinstance(overqualification, dict):
+		flag = overqualification.get("overqualification_flag")
+		if flag is None:
+			flag = overqualification.get("flag")
+		if flag is not None:
+			return "Yes" if flag else "No"
+	return _as_display_text(overqualification)
+
+
+def _requirement_items(value) -> list:
+	"""Return structured requirement records from common schema shapes."""
+	if isinstance(value, dict):
+		return [
+			{"requirement": key, **item} if isinstance(item, dict) else {"requirement": key, "matched": item}
+			for key, item in value.items()
+		]
+	if isinstance(value, (list, tuple)):
+		return list(value)
+	return []
+
+
+def _count_structured_requirements(candidate: dict, matched: bool):
+	"""Count only explicit structured match or missing indicators."""
+	requirement_matches = _requirement_items(candidate.get("requirement_matches"))
+	if not requirement_matches:
+		return None
+
+	count = 0
+	for item in requirement_matches:
+		if not isinstance(item, dict):
+			return None
+		item_matched = item.get("matched")
+		if item_matched is None:
+			item_matched = item.get("is_matched")
+		if not isinstance(item_matched, bool):
+			return None
+		if item_matched is matched:
+			count += 1
+	return count
+
+
+def _candidate_label(candidate: dict, index: int) -> str:
+	"""Create a stable selector label without changing candidate data."""
+	name = _as_display_text(candidate.get("name"), "Unnamed candidate")
+	rank = candidate.get("rank")
+	return f"#{rank} — {name}" if rank is not None else f"{name} — entry {index + 1}"
+
+
+def _sort_candidates(candidates: list) -> list[dict]:
+	"""Display valid candidate dictionaries in their supplied rank order."""
+	valid_candidates = [candidate for candidate in candidates if isinstance(candidate, dict)]
+	return sorted(
+		valid_candidates,
+		key=lambda candidate: (
+			candidate.get("rank") is None,
+			candidate.get("rank") if isinstance(candidate.get("rank"), (int, float)) else 0,
+		),
+	)
+
+
+def _ranking_rows(candidates: list[dict]) -> list[dict]:
+	"""Build display rows directly from candidate fields without recalculating scores."""
+	rows = []
+	for candidate in candidates:
+		scores = candidate.get("scores")
+		scores = scores if isinstance(scores, dict) else {}
+		rows.append(
+			{
+				"Rank": _as_display_text(candidate.get("rank")),
+				"Candidate": _as_display_text(candidate.get("name"), "Unnamed candidate"),
+				"Final Score": _as_display_text(scores.get("final_score")),
+				"Semantic Relevance": _as_display_text(scores.get("semantic")),
+				"Explicit Requirement Coverage": _as_display_text(scores.get("keyword")),
+				"Evidence Authenticity": _as_display_text(scores.get("evidence")),
+				"Related-Skill Evidence": _as_display_text(scores.get("graph")),
+				"Ranking Confidence": _candidate_confidence(candidate),
+				"Required Matched": _as_display_text(_count_structured_requirements(candidate, True)),
+				"Required Missing": _as_display_text(_count_structured_requirements(candidate, False)),
+				"Role-level mismatch": _role_level_mismatch(candidate),
+			}
+		)
+	return rows
+
+
+def _render_evidence(requirement_matches) -> None:
+	"""Show available evidence snippets without creating or inferring evidence."""
+	evidence_rows = []
+	for item in _requirement_items(requirement_matches):
+		if not isinstance(item, dict):
+			continue
+		evidence = item.get("evidence_text") or item.get("evidence") or item.get("snippet")
+		if evidence:
+			requirement = item.get("requirement") or item.get("skill") or "Requirement"
+			evidence_rows.append({"Requirement": requirement, "Evidence": evidence})
+
+	if evidence_rows:
+		st.dataframe(evidence_rows, use_container_width=True, hide_index=True)
 	else:
+		st.caption("Evidence not available.")
+
+
+def render_candidate_detail(candidate: dict) -> None:
+	"""Render optional candidate details defensively."""
+	st.subheader(_as_display_text(candidate.get("name"), "Unnamed candidate"))
+	left, right = st.columns(2)
+	with left:
+		st.metric("Rank", _as_display_text(candidate.get("rank")))
+	with right:
+		scores = candidate.get("scores")
+		scores = scores if isinstance(scores, dict) else {}
+		st.metric("Final score", _as_display_text(scores.get("final_score")))
+
+	st.markdown("#### Score breakdown")
+	scores = candidate.get("scores")
+	scores = scores if isinstance(scores, dict) else {}
+	st.dataframe(
+		[
+			{"Measure": "Semantic relevance", "Score": scores.get("semantic", "Not available")},
+			{"Measure": "Explicit requirement coverage", "Score": scores.get("keyword", "Not available")},
+			{"Measure": "Evidence authenticity", "Score": scores.get("evidence", "Not available")},
+			{"Measure": "Related-skill evidence", "Score": scores.get("graph", "Not available")},
+		],
+		use_container_width=True,
+		hide_index=True,
+	)
+
+	st.markdown("#### Matched requirements")
+	matched_requirements = candidate.get("requirement_matches") or candidate.get("matched_skills")
+	st.write(_as_display_text(matched_requirements))
+	st.markdown("#### Evidence snippets")
+	_render_evidence(candidate.get("requirement_matches"))
+	st.markdown("#### Missing requirements")
+	st.write(_as_display_text(candidate.get("missing_skills")))
+
+	optional_details = [
+		("Parse quality", candidate.get("parse_quality")),
+		("Ranking confidence", _candidate_confidence(candidate)),
+		("Self-critique", candidate.get("critique")),
+		("Role-level mismatch", _role_level_mismatch(candidate)),
+	]
+	for label, value in optional_details:
+		st.markdown(f"#### {label}")
+		st.write(_as_display_text(value))
+
+
+def render_ranking_tab() -> None:
+	"""Render supplied ranked candidates without modifying their ranking."""
+	ranked_candidates = st.session_state.get("ranked_candidates", [])
+	if not isinstance(ranked_candidates, list) or not ranked_candidates:
 		render_empty_state(
 			"Ranked candidates will appear here after the analysis pipeline is connected."
 		)
+		return
+
+	candidates = _sort_candidates(ranked_candidates)
+	if not candidates:
+		render_empty_state("Ranked candidates will appear here after the analysis pipeline is connected.")
+		return
+
+	st.dataframe(_ranking_rows(candidates), use_container_width=True, hide_index=True)
+	labels = [_candidate_label(candidate, index) for index, candidate in enumerate(candidates)]
+	selected_label = st.selectbox("Select a candidate for details", labels)
+	selected_index = labels.index(selected_label)
+	selected_candidate = candidates[selected_index]
+	st.session_state["selected_candidates"] = [selected_candidate]
+	st.markdown("### Candidate details")
+	render_candidate_detail(selected_candidate)
 
 
 def render_compare_tab() -> None:
