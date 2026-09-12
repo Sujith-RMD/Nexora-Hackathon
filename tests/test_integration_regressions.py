@@ -129,7 +129,8 @@ def test_uploads_and_all_ui_tabs_with_real_results():
     assert not at.text_area
     visible_text = "\n".join(element.value for element in at.markdown)
     assert all(name in visible_text for name in team["member_names"])
-    assert at.dataframe[0].value["Required Matched"].astype(int).max() <= 3
+    ranking_columns = set(at.dataframe[0].value.columns)
+    assert {"Required Matched", "Required Missing", "Role-level mismatch to review"}.isdisjoint(ranking_columns)
     at.selectbox[0].select_index(len(ranked) - 1).run()
     assert not at.exception
     assert at.text_area

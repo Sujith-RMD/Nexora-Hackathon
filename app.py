@@ -175,12 +175,57 @@ def _ranking_rows(candidates: list[dict]) -> list[dict]:
 				"Evidence Authenticity": _as_display_text(scores.get("evidence")),
 				"Related-Skill Evidence": _as_display_text(scores.get("graph")),
 				"Ranking Confidence": _candidate_confidence(candidate),
-				"Required Matched": len(candidate.get("matched_required_skills", [])),
-				"Required Missing": len(candidate.get("missing_required_skills", [])),
-				"Role-level mismatch to review": _role_level_mismatch(candidate),
 			}
 		)
 	return rows
+
+
+def _render_labeled_value(label: str, value, fallback: str = "Not available") -> None:
+	"""Render a scalar detail without Streamlit expanding dictionaries into rows."""
+	st.markdown(f"**{label}:** {_as_display_text(value, fallback)}")
+
+
+def _render_parse_quality(parse_quality) -> None:
+	"""Render parse quality as a short status line and warning list."""
+	if not isinstance(parse_quality, dict):
+		_render_labeled_value("Parse quality", parse_quality)
+		return
+	_render_labeled_value("Score", parse_quality.get("score"))
+	warnings = parse_quality.get("warnings") or []
+	if warnings:
+		st.markdown("**Warnings:**")
+		for warning in warnings:
+			st.markdown(f"- {warning}")
+	else:
+		st.caption("No warnings")
+
+
+def _render_critique(critique) -> None:
+	"""Render self-critique fields as readable text instead of a raw mapping."""
+	if not isinstance(critique, dict):
+		_render_labeled_value("Self-critique", critique)
+		return
+	_render_labeled_value("Confidence", critique.get("confidence"))
+	_render_labeled_value("Summary", critique.get("summary"))
+	flags = critique.get("flags") or []
+	if flags:
+		st.markdown("**Flags:**")
+		for flag in flags:
+			st.markdown(f"- {flag}")
+	_render_labeled_value(
+		"Human review recommended",
+		critique.get("human_review_recommended"),
+		"No",
+	)
+
+
+def _render_key_value_list(value) -> None:
+	"""Render structured dictionaries as labeled lines, preserving nested values."""
+	if not isinstance(value, dict):
+		_render_labeled_value("Value", value)
+		return
+	for key, item in value.items():
+		_render_labeled_value(str(key).replace("_", " ").title(), item)
 
 
 def _render_evidence(requirement_matches) -> None:
@@ -288,15 +333,14 @@ def render_candidate_detail(candidate: dict) -> None:
 	st.write(_as_display_text(candidate.get("missing_required_skills") or candidate.get("missing_skills"), "None identified"))
 	st.write("Missing-required penalty:", (candidate.get("score_adjustments") or {}).get("critical_missing_penalty", 0))
 
-	optional_details = [
-		("Parse quality", candidate.get("parse_quality")),
-		("Ranking confidence", _candidate_confidence(candidate)),
-		("Self-critique", candidate.get("critique")),
-		("Role-level mismatch to review", _role_level_mismatch(candidate)),
-	]
-	for label, value in optional_details:
-		st.markdown(f"#### {label}")
-		st.write(_as_display_text(value))
+	st.markdown("#### Parse quality")
+	_render_parse_quality(candidate.get("parse_quality"))
+	st.markdown("#### Ranking confidence")
+	_render_labeled_value("Confidence", _candidate_confidence(candidate))
+	st.markdown("#### Self-critique")
+	_render_critique(candidate.get("critique"))
+	st.markdown("#### Role-level mismatch to review")
+	_render_labeled_value("Review required", _role_level_mismatch(candidate))
 
 	st.markdown("#### Interview verification questions")
 	probes = candidate.get("interview_probes")
@@ -310,12 +354,12 @@ def render_candidate_detail(candidate: dict) -> None:
 	counterfactual = candidate.get("counterfactual")
 	if counterfactual:
 		st.caption("Simulation — not a hiring guarantee")
-		st.write(_as_display_text(counterfactual))
+		_render_key_value_list(counterfactual)
 	else:
 		st.caption("Not available")
 
 	st.markdown("#### Alternative role direction")
-	st.write(_as_display_text(candidate.get("alternative_role")))
+	_render_key_value_list(candidate.get("alternative_role"))
 
 	if 0 < candidate.get("rank", 0) <= 3:
 		return
@@ -380,10 +424,6 @@ def render_compare_tab() -> None:
 			{"Measure": "Semantic difference (A - B)", "Value": _as_display_text(comparison.get("semantic_difference"))},
 			{"Measure": "Keyword difference (A - B)", "Value": _as_display_text(comparison.get("keyword_difference"))},
 			{"Measure": "Evidence difference (A - B)", "Value": _as_display_text(comparison.get("evidence_difference"))},
-			{"Measure": "A unique matches", "Value": _as_display_text(comparison.get("a_unique_matches"))},
-			{"Measure": "B unique matches", "Value": _as_display_text(comparison.get("b_unique_matches"))},
-			{"Measure": "A missing requirements", "Value": _as_display_text(comparison.get("a_missing"))},
-			{"Measure": "B missing requirements", "Value": _as_display_text(comparison.get("b_missing"))},
 		],
 		use_container_width=True,
 		hide_index=True,
@@ -399,8 +439,6 @@ def render_team_mode_tab() -> None:
 	st.write(", ".join(team_result.get("member_names") or []) or team_result.get("note", "Not available"))
 	st.dataframe(
 		[
-			{"Measure": "Required skill coverage", "Value": _as_display_text(team_result.get("required_skill_coverage"))},
-			{"Measure": "Required evidence coverage", "Value": _as_display_text(team_result.get("evidence_score"))},
 			{"Measure": "Average semantic relevance", "Value": _as_display_text(team_result.get("semantic_score"))},
 			{"Measure": "Team score", "Value": _as_display_text(team_result.get("team_score"))},
 		],
