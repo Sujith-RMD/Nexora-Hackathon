@@ -100,6 +100,15 @@ def split_resume_sections(text: str) -> Dict[str, str]:
         if not stripped:
             continue
 
+        if ":" in stripped:
+            heading, content = stripped.split(":", 1)
+            inline_section, is_inline_header = _identify_header(heading)
+            if is_inline_header:
+                current_section = inline_section
+                if content.strip():
+                    sections[current_section].append(content.strip())
+                continue
+
         sec_name, is_header = _identify_header(stripped)
         if is_header:
             current_section = sec_name

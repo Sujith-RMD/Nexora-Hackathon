@@ -22,6 +22,11 @@ def match_requirement_keywords(
     Returns requirement match metadata including matched variant and highest priority section.
     """
     alias_dict = aliases if aliases is not None else load_skill_aliases()
+    alternatives = requirement.get("alternatives")
+    if alternatives:
+        results = [match_requirement_keywords({**requirement, "name": name, "alternatives": []}, candidate_sections, alias_dict) for name in alternatives]
+        best = next((r for r in results if r["keyword_match"]), results[0])
+        return {**best, "requirement_name": requirement["name"], "matched_alternative": best["requirement_name"] if best["keyword_match"] else ""}
     req_name = str(requirement.get("name", ""))
     canonical = normalize_skill(req_name, alias_dict)
 
@@ -47,6 +52,7 @@ def match_requirement_keywords(
         "keyword_score": 100.0 if matched else 0.0,
         "matched_variant": matched_variant or "",
         "section": best_section,
+        "matched_alternative": canonical if matched else "",
     }
 
 

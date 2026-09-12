@@ -4,3 +4,15 @@ __pycache__/
 *$py.class
 .DS_Store
 .pytest_cache/
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Local model cache / results produced at runtime
+results/*.json
+*.log
+models/
+results/

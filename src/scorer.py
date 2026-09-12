@@ -53,13 +53,14 @@ def merge_requirement_matches(
 
         # Best explanatory snippet: prefer evidence text if available, fallback to semantic best chunk
         evidence_snippet = evi.get("evidence_text", "")
-        if not evidence_snippet and sem.get("best_chunk"):
-            evidence_snippet = sem.get("best_chunk", "")
 
         unified.append(
             {
                 "requirement_id": req_id,
                 "requirement_name": req_name,
+                "matched_alternative": kw.get("matched_alternative", ""),
+                "evidence_alternative": evi.get("evidence_alternative", kw.get("matched_alternative", "")),
+                "semantic_evidence_text": sem.get("best_chunk", ""),
                 "keyword_match": is_kw_match,
                 "keyword_score": float(kw.get("keyword_score", 0.0)),
                 "semantic_score": sem_score,
@@ -120,6 +121,7 @@ def score_candidate(
     candidate["matched_required_skills"] = keyword_result.get("matched_required", [])
     candidate["missing_required_skills"] = missing_required
     candidate["matched_preferred_skills"] = keyword_result.get("matched_preferred", [])
+    candidate["score_adjustments"] = {"critical_missing_penalty": penalty, "missing_required": list(missing_required)}
 
     candidate["scores"] = {
         "semantic": round(sem_score, 2),

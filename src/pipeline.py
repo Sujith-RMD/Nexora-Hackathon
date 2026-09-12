@@ -18,9 +18,9 @@ from .semantic_matcher import get_semantic_model, semantic_match
 from .skill_extractor import extract_skills_from_text
 
 
-def parse_candidate_from_pdf(pdf_path: str, candidate_id: Optional[str] = None) -> CandidateDict:
+def parse_candidate_from_pdf(pdf_path: str, candidate_id: Optional[str] = None, source_name: Optional[str] = None) -> CandidateDict:
     """Parse a single resume PDF and create an initialized CandidateDict."""
-    filename = os.path.basename(pdf_path)
+    filename = os.path.basename(source_name or pdf_path)
     cid = candidate_id or os.path.splitext(filename)[0]
 
     # Derive human-friendly display name from filename (e.g. sde__ishaan_kapoor.pdf -> Ishaan Kapoor)
@@ -29,6 +29,8 @@ def parse_candidate_from_pdf(pdf_path: str, candidate_id: Optional[str] = None) 
         raw_name = base.split("__")[-1]
     else:
         raw_name = base
+    import re
+    raw_name = re.sub(r"^.*?Resume_\d+_", "", raw_name, flags=re.I)
     display_name = " ".join([part.capitalize() for part in raw_name.replace("_", " ").split()])
 
     parsed = parse_pdf_with_metadata(pdf_path)

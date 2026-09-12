@@ -62,6 +62,10 @@ def evaluate_requirement_evidence(
 ) -> Dict[str, Any]:
     """Evaluate evidence authenticity for a single requirement across resume sections."""
     alias_dict = aliases if aliases is not None else load_skill_aliases()
+    if requirement.get("alternatives"):
+        results = [evaluate_requirement_evidence({**requirement, "name": name, "alternatives": []}, candidate_sections, alias_dict) for name in requirement["alternatives"]]
+        best = max(results, key=lambda r: r["evidence_strength"])
+        return {**best, "requirement_name": requirement["name"], "evidence_alternative": best["requirement_name"] if best["evidence_strength"] else ""}
     req_name = str(requirement.get("name", ""))
     canonical = normalize_skill(req_name, alias_dict)
 
@@ -86,14 +90,14 @@ def evaluate_requirement_evidence(
 
     if action_sents:
         # Check for action verb & contextual depth
-        has_action = any(_has_action_verb(s) for s in action_sents)
-        has_context = any(len(s) >= 35 for s in action_sents)
+        best_sentence = max(action_sents, key=lambda s: (_has_action_verb(s) and len(s) >= 35, _has_action_verb(s), len(s)))
+        has_action = _has_action_verb(best_sentence)
+        has_context = len(best_sentence) >= 35
 
         # Select the most detailed sentence as representative snippet
-        best_sentence = max(action_sents, key=len)
         evidence_text = best_sentence
 
-        if proj_sents:
+        if best_sentence in proj_sents:
             evidence_type = "project"
         else:
             evidence_type = "experience"

@@ -11,6 +11,7 @@ from .skill_extractor import (
     find_skill_matches,
     load_skill_aliases,
     normalize_skill,
+    get_skill_pattern,
 )
 
 
@@ -82,7 +83,7 @@ IMPORTANCE_WEIGHTS = {
 }
 
 REQUIRED_CUES = [
-    r"\bmust\s+(?:have|be|demonstrate)\b",
+    r"\bmust\b",
     r"\brequired\b",
     r"\brequirements?\b",
     r"\bessential\b",
@@ -166,7 +167,9 @@ def extract_requirements(
     alias_dict = aliases if aliases is not None else load_skill_aliases()
     detected_skills = extract_skills_from_text(jd_text, skill_catalog, alias_dict)
 
-    raw_sentences = re.split(r"\n+|[•;]|\s+[-*]\s+|\.\s+(?=[A-Z0-9\"'(\[])", jd_text)
+    extraction_text = re.sub(r"\bor\s*\n\s*", "or ", jd_text, flags=re.I)
+    extraction_text = re.sub(r"\n\s*(?=or\b)", " ", extraction_text, flags=re.I)
+    raw_sentences = re.split(r"\n+|[•;]|\s+[-*]\s+|\.\s+(?=[A-Z0-9\"'(\[])", extraction_text)
     sentences = [s.strip() for s in raw_sentences if s.strip()]
 
     requirements: List[Dict[str, object]] = []
@@ -222,6 +225,61 @@ def extract_requirements(
             }
         )
 
+    # Group only explicit alternatives in the same clause. AND-connected skills
+    # remain independent. Rebuild per occurrence so an alternative in one clause
+    # cannot erase a separate mandatory occurrence elsewhere in the JD.
+    by_name = {r["name"]: r for r in requirements}
+    grouped = {}
+    heading_importance = "context"
+    for sentence in sentences:
+        if re.fullmatch(r"(?:required|requirements|essential|preferred|nice to have|bonus)(?: skills| qualifications)?\s*:?", sentence, re.I):
+            heading_importance = _determine_importance(sentence, jd_text)
+            continue
+        occurrences = []
+        for name in by_name:
+            variants = {name} | {a for a, target in alias_dict.items() if target == name}
+            for variant in variants:
+                occurrences.extend((m.start(), m.end(), name) for m in get_skill_pattern(variant).finditer(sentence))
+        # Longest alias wins at overlapping spans (React Native is not React).
+        spans = []
+        for span in sorted(occurrences, key=lambda s: (-(s[1] - s[0]), s[0], s[2])):
+            if not any(span[0] < old[1] and old[0] < span[1] for old in spans):
+                spans.append(span)
+        spans.sort()
+        groups = []
+        for i, span in enumerate(spans):
+            connector = sentence[spans[i - 1][1]:span[0]].strip() if i else ""
+            comma_alternative = False
+            if connector == ",":
+                for j in range(i + 1, len(spans)):
+                    ahead = sentence[spans[j - 1][1]:spans[j][0]].strip()
+                    if re.fullmatch(r",?\s*or", ahead, re.I):
+                        comma_alternative = True
+                        break
+                    if ahead != ",":
+                        break
+            if i and (comma_alternative or re.fullmatch(r"(?:,?\s*or|and/or)", connector, re.I)):
+                groups[-1].append(span[2])
+            else:
+                groups.append([span[2]])
+        importance = _determine_importance(sentence, jd_text)
+        if importance == "context":
+            importance = heading_importance
+        for names in groups:
+            names = sorted(set(names))
+            key = tuple(names)
+            req = dict(by_name[names[0]])
+            req.update(source_text=sentence, importance=importance, weight=IMPORTANCE_WEIGHTS[importance])
+            if len(names) > 1:
+                req.update(
+                    id="req_any_" + "__".join(re.sub(r"[^a-z0-9]+", "_", n).strip("_") for n in names),
+                    name=" or ".join(names),
+                    display_name=" OR ".join(by_name[n]["display_name"] for n in names),
+                    alternatives=names, match_mode="any",
+                )
+            if key not in grouped or req["weight"] > grouped[key]["weight"]:
+                grouped[key] = req
+    requirements = list(grouped.values())
     # Sort requirements: required first (by weight desc), then alphabetically
     requirements.sort(key=lambda r: (-float(r["weight"]), str(r["name"])))
     return requirements

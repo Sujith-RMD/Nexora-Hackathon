@@ -6,6 +6,11 @@ aggregate semantic scores.
 """
 
 import re
+import os
+from pathlib import Path
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
 from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
@@ -22,11 +27,17 @@ def get_semantic_model(model_name: str = _DEFAULT_MODEL_NAME) -> Any:
     """Load and cache the local SentenceTransformer model singleton."""
     global _CACHED_MODEL
     if _CACHED_MODEL is None:
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
         if SentenceTransformer is None:
             raise ImportError(
                 "sentence-transformers is not installed. Please install requirements.txt."
             )
-        _CACHED_MODEL = SentenceTransformer(model_name)
+        try:
+            packaged = Path(__file__).resolve().parents[1] / "models" / "all-MiniLM-L6-v2"
+            default_path = str(packaged) if packaged.is_dir() and model_name == _DEFAULT_MODEL_NAME else model_name
+            _CACHED_MODEL = SentenceTransformer(os.environ.get("INTERNLOOM_MODEL_PATH", default_path), local_files_only=True)
+        except OSError as exc:
+            raise RuntimeError("Local embedding model is unavailable. Prepare all-MiniLM-L6-v2 before the demo or set INTERNLOOM_MODEL_PATH to its local directory. Analysis requires the real semantic model.") from exc
     return _CACHED_MODEL
 
 
@@ -132,7 +143,13 @@ def semantic_match(
 
     # Prepare requirement texts
     req_texts: List[str] = []
+    query_ranges = []
     for req in requirements:
+        start = len(req_texts)
+        if req.get("alternatives"):
+            req_texts.extend(f"{req.get('category', 'technical')} experience with {option}" for option in req["alternatives"])
+            query_ranges.append((start, len(req_texts)))
+            continue
         name = str(req.get("name", ""))
         source = str(req.get("source_text", ""))
         category = str(req.get("category", ""))
@@ -142,6 +159,7 @@ def semantic_match(
         else:
             text_rep = f"{category} skill: {name}" if category else name
         req_texts.append(text_rep)
+        query_ranges.append((start, len(req_texts)))
 
     chunk_texts = [c["text"] for c in chunks]
 
@@ -170,7 +188,8 @@ def semantic_match(
         weight = float(req.get("weight", 1.0))
         total_weight += weight
 
-        sims = similarity_matrix[i]
+        start, end = query_ranges[i]
+        sims = similarity_matrix[start:end].max(axis=0)
         best_idx = int(np.argmax(sims))
         best_sim = float(sims[best_idx])
         best_chunk_obj = chunks[best_idx]
