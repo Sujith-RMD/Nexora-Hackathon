@@ -102,11 +102,48 @@ and real PDFs from `data/resumes/`:
   an explicit "REST API" token extracts correctly. Consider adding sentence-
   cue → skill inference for API-type phrases.
 - T1's branch deleted `TEAMMATE_2/3_*.md` docs; we kept them on `teammate2`.
-- No `data/jd/*.pdf` sample JD exists yet.
+- ~~No `data/jd/*.pdf` sample JD exists yet.~~ → We generated
+  `data/jd/Sample_JD.pdf` (+ `.txt` source) during the UI integration.
+
+## 4b. Integration with Teammate 3's UI — ✅ DONE 2026-09-12
+
+`origin/teammate-3` delivered **only `app.py`** (a clean, defensive
+Streamlit shell; every tab was an empty-state stub and the merge is
+non-conflicting — branched from root, touching no other files).
+
+What we wired on top of it (presentation logic kept theirs, structure and
+helper names preserved):
+
+1. ✅ `src/analysis_runner.py` — bridges in-memory Streamlit uploads
+   (bytes) to T1's path-based parser via temp files; runs the complete
+   `build_jd → run_trust_layer` chain with stage callbacks for progress UI.
+2. ✅ `main()` Analyze button now runs the real pipeline into
+   `session_state` (previously printed "pipeline not connected").
+3. ✅ Schema-key compat fixes inside their helpers: `missing_skills` →
+   real key `missing_required_skills` (fallback kept), evidence table now
+   resolves `requirement_name` (it looked for `requirement/skill/name`).
+4. ✅ Team Mode / Compare / JD Review tabs implemented from the payload we
+   already emit (read-only; no second ranking engine — Rule 2 respected).
+   Evidence table gained a **Skill-graph support** column showing paths
+   like `express → rest api (76.5%)` — the demo differentiator, visible.
+5. ✅ `src/jd_bias.py` — their spec'd module was never written; we added a
+   minimal deterministic rule fallback (fills the MASTER §7.1 `bias_flags`
+   slot). **Teammate 3: replace at will, keep `review_jd(jd) -> list[dict]`.**
+6. ✅ Sidebar "Use bundled sample batch" mode — demo needs zero uploads.
+7. ✅ Headless proof: `streamlit.testing.v1.AppTest` boots `app.py`,
+   switches to sample mode, clicks Analyze, and asserts 5 ranked +
+   enriched candidates and a valid team in session state with no
+   exceptions (in `tests/test_teammate2_integration.py`).
+
+**Still teammate-3's (not in their tabs either):** rejection-notice drafts,
+role routing (`candidate_outcomes.py`), `config/role_clusters.json`,
+export buttons. Not blocking the end-to-end demo.
 
 ## 5. Known limitations (honest list)
 
-- Everything is validated against **fixtures**, not real PDFs, until T1 merges.
+- ~~Everything is validated against **fixtures**, not real PDFs~~ → unit
+  suite is fixture-based; integration tests + scale check now run on the
+  54 real resume PDFs and the real Streamlit app.
 - Overqualification regexes are heuristic; unusual resume formatting may miss
   cues (acceptable: flag-only feature, recruiter decides).
 - Counterfactual gains slightly conservative vs. the real scorer's penalty

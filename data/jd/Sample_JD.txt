@@ -1,0 +1,28 @@
+Job Title: Junior Full Stack Developer Intern
+
+About the Role:
+We are looking for an enthusiastic intern to join our product engineering
+team. You will work alongside senior engineers to design, build, and ship
+features across our web application.
+
+Requirements:
+- Must have strong experience with React and Node.js.
+- Required: Proficient in MongoDB database design.
+- Must be able to build and consume REST API services.
+- Good knowledge of HTML, CSS, and JavaScript fundamentals.
+- Familiarity with Git and version control workflows.
+
+Preferred:
+- Familiarity with Docker and AWS.
+- Exposure to TypeScript or Express.
+- Contributions to open-source or personal projects.
+
+Responsibilities:
+- Build and maintain frontend components with React.
+- Implement backend endpoints and integrate third-party APIs.
+- Participate in code reviews and team standups.
+- Write unit tests and clear documentation for your features.
+
+Internship Details:
+- Duration: 6 months, in-person (Bengaluru).
+- Stipend: Competitive, based on demonstrated skill.

@@ -411,7 +411,8 @@ def test_no_network_capable_imports():
     banned = ("import requests", "import urllib", "import socket", "import http",
               "urllib.request", "http.client", "openai", "google.generativeai")
     for module in ("skill_graph", "critique", "overqualification", "probes",
-                   "team_mode", "counterfactual", "trust_pipeline"):
+                   "team_mode", "counterfactual", "trust_pipeline",
+                   "jd_bias", "analysis_runner"):
         source = (ROOT / "src" / f"{module}.py").read_text(encoding="utf-8")
         for needle in banned:
             assert needle not in source, f"{module}.py contains forbidden reference: {needle}"

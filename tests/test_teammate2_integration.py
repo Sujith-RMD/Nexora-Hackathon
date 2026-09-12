@@ -238,3 +238,91 @@ def test_it_real_pdfs_end_to_end():
     # At least one web/SDE profile should show non-trivial keyword coverage.
     best_kw = max(c["scores"]["keyword"] for c in ranked)
     assert best_kw >= 25.0, f"no candidate reached any meaningful coverage ({best_kw})"
+
+
+# ---------------------------------------------------------------------------
+# UI integration layer (src/analysis_runner.py + app.py)
+# ---------------------------------------------------------------------------
+
+def test_it_jd_bias_rules_deterministic():
+    from src.jd_bias import review_jd
+
+    risky = build_jd(
+        "Job Title: Rockstar developer\n"
+        "We want a recent graduate, young and energetic, digital native,\n"
+        "must have a degree, good communication skills, culture fit.\n"
+        "Requirements:\n- Must know React."
+    )
+    flags = review_jd(risky)
+    phrases = {f["phrase"] for f in flags}
+    assert {"rockstar", "recent graduate", "young", "culture fit"} <= phrases
+    assert all(set(f) == {"phrase", "reason", "suggestion"} for f in flags)
+
+    clean = review_jd(build_jd(JD_TEXT))
+    assert clean == [], f"clean intern JD must not raise flags, got {clean}"
+    # determinism
+    assert review_jd(risky) == flags
+
+
+def test_it_analysis_runner_from_upload_bytes():
+    """Exactly what the Streamlit file uploader hands us: bytes + names."""
+    try:
+        import fitz  # noqa: F401
+    except ImportError:
+        print("      (skipped: PyMuPDF not installed)")
+        return
+    from src.analysis_runner import analyze_uploads
+
+    jd_bytes = (ROOT / "data" / "jd" / "Sample_JD.pdf").read_bytes()
+    picks = ["web_dev__aditya_kulkarni.pdf", "web_dev__priya_nair.pdf",
+             "sales__aman_tiwari.pdf"]
+    resumes = [((ROOT / "data" / "resumes" / p).read_bytes(), p) for p in picks]
+
+    seen_stages = []
+    payload = analyze_uploads(jd_bytes, "Sample_JD.pdf", resumes,
+                              on_stage=seen_stages.append, model=_model())
+
+    assert set(payload) == {"jd", "ranked_candidates", "team_result",
+                            "jd_warnings", "resume_warnings"}
+    assert any("Ranking" in s for s in seen_stages), seen_stages
+    assert len(payload["ranked_candidates"]) == 3
+    assert payload["ranked_candidates"][0]["rank"] == 1
+    for c in payload["ranked_candidates"]:
+        assert c["critique"] and c["counterfactual"] and c["overqualification"]
+        assert "missing_required_skills" in c  # the key the UI reads
+    assert "members" in payload["team_result"]
+    assert isinstance(payload["jd"]["bias_flags"], list)
+    json.dumps(payload, default=str)
+
+
+def test_it_streamlit_app_boots_and_analyzes_sample_batch():
+    """The real Streamlit app, headless: boot -> sample mode -> Analyze ->
+    enriched rankings in session state. Proves the full UI integration."""
+    try:
+        from streamlit.testing.v1 import AppTest
+    except ImportError:
+        print("      (skipped: streamlit not installed)")
+        return
+
+    at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=300)
+    at.run()
+    assert not at.exception, at.exception
+    assert any("InternLoom" in str(t.value) for t in at.title)
+
+    # Switch sidebar source to the bundled batch and click Analyze.
+    at.radio[0].set_value("sample").run()
+    assert not at.exception
+    at.button[0].click()
+    at.run()
+    assert not at.exception, at.exception
+
+    ranked = at.session_state["ranked_candidates"]
+    assert len(ranked) == 5, "sample batch should rank five bundled resumes"
+    assert [c["rank"] for c in ranked] == [1, 2, 3, 4, 5]
+    assert all(c.get("critique") for c in ranked)
+    team = at.session_state["team_result"]
+    assert team and len(team["members"]) == 3
+    assert at.session_state["parsed_jd"]["requirements"]
+    # no error branch was rendered
+    assert at.session_state["last_error"] is None
+    assert len(at.error) == 0, [e.value for e in at.error]
