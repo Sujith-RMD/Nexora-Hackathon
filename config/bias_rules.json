@@ -1,0 +1,22 @@
+[
+  {
+    "pattern": "young and energetic",
+    "reason": "Potentially age-coded phrasing may unnecessarily narrow the applicant pool.",
+    "suggestion": "Use 'motivated and proactive' or describe the actual work requirement."
+  },
+  {
+    "pattern": "native english speaker",
+    "reason": "Native-language status may be narrower than the communication requirement.",
+    "suggestion": "Specify the required written or verbal English proficiency."
+  },
+  {
+    "pattern": "rockstar",
+    "reason": "Vague cultural language does not describe a measurable job requirement.",
+    "suggestion": "Describe the actual technical or performance expectation."
+  },
+  {
+    "pattern": "ninja",
+    "reason": "Vague branding language does not describe a measurable job requirement.",
+    "suggestion": "List the concrete skills, responsibilities, and experience required."
+  }
+]

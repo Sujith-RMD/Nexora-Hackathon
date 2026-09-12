@@ -1,0 +1,105 @@
+{
+  "_meta": {
+    "owner": "teammate_2",
+    "contract": "MASTER_CONTEXT.md #14 / TEAMMATE_2 #5. Edges are authored once; the loader treats them as undirected.",
+    "scope": "Deliberately small: only technologies relevant to the Junior Full Stack Developer Intern JD.",
+    "note": "Graph evidence is SUPPORTING evidence only. It never satisfies an explicit required skill by itself (see src/skill_graph.py guardrails)."
+  },
+
+  "javascript": [
+    { "target": "react", "relation": "framework_of", "weight": 0.9 },
+    { "target": "typescript", "relation": "specialization_of", "weight": 0.85 },
+    { "target": "node.js", "relation": "runtime_for", "weight": 0.9 },
+    { "target": "html", "relation": "commonly_used_with", "weight": 0.8 },
+    { "target": "css", "relation": "commonly_used_with", "weight": 0.8 }
+  ],
+
+  "typescript": [
+    { "target": "react", "relation": "commonly_used_with", "weight": 0.75 }
+  ],
+
+  "react": [
+    { "target": "frontend development", "relation": "specialization_of", "weight": 0.9 },
+    { "target": "node.js", "relation": "commonly_used_with", "weight": 0.7 }
+  ],
+
+  "html": [
+    { "target": "frontend development", "relation": "specialization_of", "weight": 0.8 },
+    { "target": "css", "relation": "commonly_used_with", "weight": 0.9 }
+  ],
+
+  "css": [
+    { "target": "frontend development", "relation": "specialization_of", "weight": 0.8 },
+    { "target": "responsive design", "relation": "commonly_used_with", "weight": 0.75 }
+  ],
+
+  "frontend development": [
+    { "target": "responsive design", "relation": "related_to", "weight": 0.8 },
+    { "target": "full stack development", "relation": "frontend_backend_relation", "weight": 0.85 },
+    { "target": "web development", "relation": "related_to", "weight": 0.8 }
+  ],
+
+  "node.js": [
+    { "target": "express", "relation": "commonly_used_with", "weight": 0.9 },
+    { "target": "backend development", "relation": "related_to", "weight": 0.8 },
+    { "target": "rest api", "relation": "commonly_used_with", "weight": 0.8 }
+  ],
+
+  "express": [
+    { "target": "rest api", "relation": "implements", "weight": 0.85 },
+    { "target": "backend development", "relation": "related_to", "weight": 0.8 }
+  ],
+
+  "rest api": [
+    { "target": "api development", "relation": "specialization_of", "weight": 0.9 },
+    { "target": "backend development", "relation": "related_to", "weight": 0.85 }
+  ],
+
+  "backend development": [
+    { "target": "server-side development", "relation": "related_to", "weight": 0.95 },
+    { "target": "api development", "relation": "commonly_used_with", "weight": 0.85 },
+    { "target": "full stack development", "relation": "frontend_backend_relation", "weight": 0.85 },
+    { "target": "web development", "relation": "related_to", "weight": 0.8 }
+  ],
+
+  "api development": [
+    { "target": "web development", "relation": "related_to", "weight": 0.75 }
+  ],
+
+  "mongodb": [
+    { "target": "nosql", "relation": "database_type", "weight": 0.9 },
+    { "target": "database", "relation": "specialization_of", "weight": 0.8 },
+    { "target": "express", "relation": "commonly_used_with", "weight": 0.75 }
+  ],
+
+  "nosql": [
+    { "target": "database", "relation": "specialization_of", "weight": 0.85 }
+  ],
+
+  "sql": [
+    { "target": "mysql", "relation": "implements", "weight": 0.9 },
+    { "target": "postgresql", "relation": "implements", "weight": 0.9 },
+    { "target": "database", "relation": "related_to", "weight": 0.85 }
+  ],
+
+  "mysql": [
+    { "target": "database", "relation": "specialization_of", "weight": 0.85 }
+  ],
+
+  "postgresql": [
+    { "target": "database", "relation": "specialization_of", "weight": 0.85 }
+  ],
+
+  "git": [
+    { "target": "version control", "relation": "implements", "weight": 0.95 },
+    { "target": "github", "relation": "commonly_used_with", "weight": 0.9 }
+  ],
+
+  "github": [
+    { "target": "version control", "relation": "related_to", "weight": 0.8 }
+  ],
+
+  "full stack development": [
+    { "target": "web development", "relation": "related_to", "weight": 0.9 }
+  ]
+}
