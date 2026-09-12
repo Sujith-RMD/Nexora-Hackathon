@@ -6,8 +6,43 @@ matching, or PDF parsing logic.
 """
 
 from pathlib import PurePath
+import os
+import tempfile
+import hashlib
 
+import numpy as np
 import streamlit as st
+
+from src.candidate_outcomes import generate_rejection_draft, route_alternative_role
+from src.counterfactual import generate_counterfactual
+from src.critique import critique_ranking
+from src.jd_bias import detect_jd_bias
+from src.overqualification import flag_overqualification
+from src.pipeline import evaluate_candidate, parse_candidate_from_pdf
+from src.probes import generate_interview_probes
+from src.ranker import rank_candidates
+from src.requirement_extractor import detect_role_level, extract_requirements
+from src.semantic_matcher import get_semantic_model
+from src.skill_graph import apply_skill_graph, load_skill_graph
+from src.team_mode import find_best_team
+
+
+class _OfflineSemanticModel:
+	"""Deterministic local fallback when the optional cached model is unavailable."""
+
+	def encode(self, texts, convert_to_numpy=True, normalize_embeddings=True, show_progress_bar=False):
+		vectors = []
+		for text in texts:
+			vector = np.zeros(64, dtype=float)
+			for token in str(text).casefold().split():
+				index = int(hashlib.sha256(token.encode("utf-8")).hexdigest(), 16) % len(vector)
+				vector[index] += 1.0
+			if normalize_embeddings:
+				norm = np.linalg.norm(vector)
+				if norm:
+					vector /= norm
+			vectors.append(vector)
+		return np.asarray(vectors)
 
 
 STATE_DEFAULTS = {
@@ -167,7 +202,7 @@ def _ranking_rows(candidates: list[dict]) -> list[dict]:
 				"Ranking Confidence": _candidate_confidence(candidate),
 				"Required Matched": _as_display_text(_count_structured_requirements(candidate, True)),
 				"Required Missing": _as_display_text(_count_structured_requirements(candidate, False)),
-				"Role-level mismatch": _role_level_mismatch(candidate),
+				"Role-level mismatch to review": _role_level_mismatch(candidate),
 			}
 		)
 	return rows
@@ -210,6 +245,39 @@ def _render_evidence(requirement_matches) -> None:
 		st.caption("Not available")
 
 
+def _render_top_three_explanations(candidates: list[dict]) -> None:
+	"""Render explanations from the structured explanation payload only."""
+	top_three = [candidate for candidate in candidates if candidate.get("rank", 0) <= 3]
+	if not top_three:
+		return
+	st.markdown("### Top 3 explanations")
+	for candidate in top_three:
+		st.markdown(f"#### #{candidate.get('rank', 'Not available')} — {_as_display_text(candidate.get('name'), 'Unnamed candidate')}")
+		scores = candidate.get("scores") if isinstance(candidate.get("scores"), dict) else {}
+		explanation_data = candidate.get("explanation_data") if isinstance(candidate.get("explanation_data"), dict) else {}
+		strongest = explanation_data.get("strongest_matches") or []
+		missing = explanation_data.get("important_missing") or candidate.get("missing_required_skills") or []
+		st.write(
+			f"Final score: {_as_display_text(scores.get('final_score'))}. "
+			f"Semantic relevance: {_as_display_text(scores.get('semantic'))}; "
+			f"explicit requirement coverage: {_as_display_text(scores.get('keyword'))}."
+		)
+		if strongest:
+			strongest_text = []
+			for item in strongest:
+				if isinstance(item, dict):
+					name = item.get("requirement_name", "Not available")
+					strength = item.get("evidence_strength", "Not available")
+					strongest_text.append(f"{name} (evidence strength: {strength})")
+			st.write("Strongest matching requirements:", ", ".join(strongest_text) or "Not available")
+		else:
+			st.write("Strongest matching requirements: Not available")
+		st.write("Important missing requirements:", _as_display_text(missing))
+		critique = candidate.get("critique") or {}
+		st.write("Ranking confidence:", _as_display_text(critique.get("confidence") if isinstance(critique, dict) else None))
+		st.write("System self-critique:", _as_display_text(critique.get("summary") if isinstance(critique, dict) else None))
+
+
 def render_candidate_detail(candidate: dict) -> None:
 	"""Render optional candidate details defensively."""
 	st.subheader(_as_display_text(candidate.get("name"), "Unnamed candidate"))
@@ -239,17 +307,45 @@ def render_candidate_detail(candidate: dict) -> None:
 	matched_requirements = candidate.get("requirement_matches")
 	_render_evidence(matched_requirements)
 	st.markdown("#### Missing requirements")
-	st.write(_as_display_text(candidate.get("missing_skills")))
+	st.write(_as_display_text(candidate.get("missing_required_skills") or candidate.get("missing_skills")))
 
 	optional_details = [
 		("Parse quality", candidate.get("parse_quality")),
 		("Ranking confidence", _candidate_confidence(candidate)),
 		("Self-critique", candidate.get("critique")),
-		("Role-level mismatch", _role_level_mismatch(candidate)),
+		("Role-level mismatch to review", _role_level_mismatch(candidate)),
 	]
 	for label, value in optional_details:
 		st.markdown(f"#### {label}")
 		st.write(_as_display_text(value))
+
+	st.markdown("#### Interview verification questions")
+	probes = candidate.get("interview_probes")
+	if isinstance(probes, list) and probes:
+		for probe in probes[:5]:
+			st.write(f"- {probe}")
+	else:
+		st.caption("Not available")
+
+	st.markdown("#### Counterfactual")
+	counterfactual = candidate.get("counterfactual")
+	if counterfactual:
+		st.caption("Simulation — not a hiring guarantee")
+		st.write(_as_display_text(counterfactual))
+	else:
+		st.caption("Not available")
+
+	st.markdown("#### Alternative role direction")
+	st.write(_as_display_text(candidate.get("alternative_role")))
+
+	st.markdown("#### Recruiter-review rejection draft")
+	jd = st.session_state.get("parsed_jd") or {}
+	st.text_area(
+		"Draft",
+		generate_rejection_draft(candidate, jd),
+		height=220,
+		label_visibility="collapsed",
+	)
 
 
 def render_ranking_tab() -> None:
@@ -277,15 +373,146 @@ def render_ranking_tab() -> None:
 
 
 def render_compare_tab() -> None:
-	render_empty_state("Candidate comparisons will appear here after ranking is available.")
+	candidates = st.session_state.get("ranked_candidates", [])
+	if len(candidates) < 2:
+		render_empty_state("Candidate comparisons will appear here after at least two candidates are ranked.")
+		return
+	from src.compare import compare_candidates
+
+	labels = [_candidate_label(candidate, index) for index, candidate in enumerate(candidates)]
+	left, right = st.columns(2)
+	with left:
+		label_a = st.selectbox("Candidate A", labels, key="compare_candidate_a")
+	with right:
+		label_b = st.selectbox("Candidate B", labels, index=1, key="compare_candidate_b")
+	if label_a == label_b:
+		st.warning("Select two different candidates to compare.")
+		return
+	a = candidates[labels.index(label_a)]
+	b = candidates[labels.index(label_b)]
+	comparison = compare_candidates(a, b, st.session_state.get("parsed_jd") or {})
+	st.info(comparison.get("explanation", "Not available"))
+	st.dataframe(
+		[
+			{"Measure": "Final score difference (A - B)", "Value": _as_display_text(comparison.get("score_difference"))},
+			{"Measure": "Semantic difference (A - B)", "Value": _as_display_text(comparison.get("semantic_difference"))},
+			{"Measure": "Keyword difference (A - B)", "Value": _as_display_text(comparison.get("keyword_difference"))},
+			{"Measure": "Evidence difference (A - B)", "Value": _as_display_text(comparison.get("evidence_difference"))},
+			{"Measure": "A unique matches", "Value": _as_display_text(comparison.get("a_unique_matches"))},
+			{"Measure": "B unique matches", "Value": _as_display_text(comparison.get("b_unique_matches"))},
+			{"Measure": "A missing requirements", "Value": _as_display_text(comparison.get("a_missing"))},
+			{"Measure": "B missing requirements", "Value": _as_display_text(comparison.get("b_missing"))},
+		],
+		use_container_width=True,
+		hide_index=True,
+	)
 
 
 def render_team_mode_tab() -> None:
-	render_empty_state("Team recommendations will appear here after team analysis is connected.")
+	team_result = st.session_state.get("team_result")
+	if not team_result:
+		render_empty_state("Team recommendations will appear here after analysis is complete.")
+		return
+	st.subheader("Best Complementary 3-Person Team")
+	members = team_result.get("selected_candidates") or team_result.get("members") or []
+	st.write(", ".join(_as_display_text(member.get("name"), "Unnamed candidate") for member in members if isinstance(member, dict)) or "Not available")
+	st.dataframe(
+		[
+			{"Measure": "Required skill coverage", "Value": _as_display_text(team_result.get("required_skill_coverage"))},
+			{"Measure": "Average evidence", "Value": _as_display_text(team_result.get("average_evidence"))},
+			{"Measure": "Average semantic relevance", "Value": _as_display_text(team_result.get("average_semantic"))},
+			{"Measure": "Team score", "Value": _as_display_text(team_result.get("team_score"))},
+		],
+		use_container_width=True,
+		hide_index=True,
+	)
+	st.write("Required skill coverage:", _as_display_text(team_result.get("covered_required_skills")))
+	st.write("Complementary strengths:", _as_display_text(team_result.get("complementary_strengths")))
+	st.write("Remaining gaps:", _as_display_text(team_result.get("remaining_gaps")))
 
 
 def render_jd_review_tab() -> None:
-	render_empty_state("Job description insights will appear here after JD analysis is connected.")
+	jd = st.session_state.get("parsed_jd") or {}
+	if not jd:
+		render_empty_state("Job description insights will appear here after analysis is complete.")
+		return
+	st.subheader("Potentially narrow phrasing")
+	flags = jd.get("bias_flags") or []
+	if not flags:
+		st.success("No potentially narrow phrasing was detected by the configured rules.")
+		return
+	st.dataframe(flags, use_container_width=True, hide_index=True)
+
+
+def _uploaded_file_to_temp(uploaded_file) -> str:
+	"""Write an upload to a temporary PDF path for the existing path-based parser."""
+	suffix = PurePath(uploaded_file.name).suffix.lower() or ".pdf"
+	with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as handle:
+		handle.write(uploaded_file.getvalue())
+		return handle.name
+
+
+@st.cache_resource(show_spinner=False)
+def _load_local_semantic_model():
+	os.environ.setdefault("HF_HUB_OFFLINE", "1")
+	try:
+		return get_semantic_model()
+	except Exception:
+		return _OfflineSemanticModel()
+
+
+def run_analysis(jd_file, resume_files) -> tuple[list[dict], dict, dict]:
+	"""Run the existing local pipeline and add trust-layer enrichments."""
+	temporary_paths = []
+	try:
+		jd_path = _uploaded_file_to_temp(jd_file)
+		temporary_paths.append(jd_path)
+		jd_parsed = __import__("src.pdf_parser", fromlist=["parse_pdf_with_metadata"]).parse_pdf_with_metadata(jd_path)
+		jd_text = str(jd_parsed.get("text", ""))
+		requirements = extract_requirements(jd_text)
+		jd = {
+			"title": jd_text.splitlines()[0].strip() if jd_text.splitlines() else "Job description",
+			"raw_text": str(jd_parsed.get("raw_text", "")),
+			"clean_text": jd_text,
+			"requirements": requirements,
+			"role_level": detect_role_level(jd_text),
+			"bias_flags": detect_jd_bias(jd_text),
+		}
+		model = _load_local_semantic_model()
+		candidates = []
+		graph = load_skill_graph()
+		for resume_file in resume_files:
+			resume_path = _uploaded_file_to_temp(resume_file)
+			temporary_paths.append(resume_path)
+			candidate = parse_candidate_from_pdf(resume_path)
+			# First pass creates requirement-level evidence for graph enrichment.
+			evaluate_candidate(candidate, jd, semantic_model=model)
+			apply_skill_graph(jd, candidate, graph)
+			# Second pass makes the graph's 5% score part of final scoring.
+			evaluate_candidate(
+				candidate,
+				jd,
+				semantic_model=model,
+				graph_score=(candidate.get("scores") or {}).get("graph", 0.0),
+				graph_matches=candidate.get("requirement_matches"),
+			)
+			candidates.append(candidate)
+		ranked = rank_candidates(candidates)
+		critique_ranking(jd, ranked)
+		for candidate in ranked:
+			flag_overqualification(jd, candidate)
+			generate_interview_probes(jd, candidate)
+			route_alternative_role(candidate)
+		for candidate in ranked:
+			generate_counterfactual(candidate, ranked, jd)
+		team_result = find_best_team(jd, ranked, team_size=3)
+		return ranked, jd, team_result
+	finally:
+		for path in temporary_paths:
+			try:
+				os.unlink(path)
+			except OSError:
+				pass
 
 
 def render_input_panel() -> tuple[object, list[object], bool]:
@@ -324,14 +551,20 @@ def main() -> None:
 		if validation_errors:
 			for error in validation_errors:
 				st.error(error)
-		elif len(resume_files) == 1:
-			st.warning(
-				"Only one resume is uploaded. Add more resumes for a meaningful shortlist comparison."
-			)
 		else:
-			st.info(
-				"The analysis pipeline is not connected yet. Your uploaded files are ready for integration."
-			)
+			if len(resume_files) == 1:
+				st.warning("Only one resume is uploaded. The shortlist will contain one candidate.")
+			try:
+				with st.status("Analyzing candidates locally...", expanded=True) as status:
+					st.write("Parsing the job description and resumes")
+					ranked, parsed_jd, team_result = run_analysis(jd_file, resume_files)
+					st.session_state["parsed_jd"] = parsed_jd
+					st.session_state["ranked_candidates"] = ranked
+					st.session_state["team_result"] = team_result
+					st.session_state["selected_candidates"] = []
+					status.update(label="Analysis complete", state="complete")
+			except Exception as error:
+				st.error(f"Analysis could not be completed: {error}")
 
 	ranking_tab, compare_tab, team_tab, jd_review_tab = st.tabs(
 		["Ranking", "Compare", "Team Mode", "JD Review"]
@@ -339,6 +572,7 @@ def main() -> None:
 
 	with ranking_tab:
 		render_ranking_tab()
+		_render_top_three_explanations(st.session_state.get("ranked_candidates", []))
 	with compare_tab:
 		render_compare_tab()
 	with team_tab:

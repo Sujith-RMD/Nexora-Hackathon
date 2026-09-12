@@ -1,0 +1,11 @@
+{
+  "javascript": [{"target": "react", "relation": "framework_of", "weight": 0.9}, {"target": "node.js", "relation": "runtime_for", "weight": 0.9}],
+  "react": [{"target": "frontend development", "relation": "specialization_of", "weight": 0.9}, {"target": "node.js", "relation": "commonly_used_with", "weight": 0.7}],
+  "node.js": [{"target": "express", "relation": "commonly_used_with", "weight": 0.9}, {"target": "rest api", "relation": "commonly_used_with", "weight": 0.8}, {"target": "backend development", "relation": "related_to", "weight": 0.8}],
+  "express": [{"target": "rest api", "relation": "implements", "weight": 0.85}],
+  "mongodb": [{"target": "nosql", "relation": "database_type", "weight": 0.9}, {"target": "database", "relation": "specialization_of", "weight": 0.8}],
+  "sql": [{"target": "database", "relation": "related_to", "weight": 0.85}],
+  "git": [{"target": "version control", "relation": "implements", "weight": 0.95}],
+  "docker": [{"target": "devops", "relation": "related_to", "weight": 0.8}],
+  "aws": [{"target": "cloud", "relation": "related_to", "weight": 0.8}]
+}

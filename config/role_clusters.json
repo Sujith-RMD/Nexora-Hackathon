@@ -1,0 +1,7 @@
+{
+  "frontend": ["react", "javascript", "typescript", "html", "css", "vue", "angular", "frontend"],
+  "backend": ["node.js", "express", "rest api", "graphql", "mongodb", "mysql", "postgresql", "sql", "backend"],
+  "data": ["python", "pandas", "numpy", "scikit-learn", "tensorflow", "pytorch", "sql", "analytics", "data"],
+  "devops": ["docker", "aws", "azure", "gcp", "linux", "kubernetes", "ci/cd", "devops"],
+  "general software engineering": ["git", "github", "java", "c++", "c#", "testing", "software engineering"]
+}

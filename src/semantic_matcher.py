@@ -6,6 +6,7 @@ aggregate semantic scores.
 """
 
 import re
+import os
 from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
@@ -22,6 +23,7 @@ def get_semantic_model(model_name: str = _DEFAULT_MODEL_NAME) -> Any:
     """Load and cache the local SentenceTransformer model singleton."""
     global _CACHED_MODEL
     if _CACHED_MODEL is None:
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
         if SentenceTransformer is None:
             raise ImportError(
                 "sentence-transformers is not installed. Please install requirements.txt."
