@@ -24,7 +24,7 @@ WEAK_EVIDENCE_RANGE = (0.35, 0.75)   # "mentioned" but not clearly demonstrated
 LISTED_ONLY_MAX = 0.35               # skills-list-only band from MASTER_CONTEXT #5.3-D2
 SEM_KW_DISAGREEMENT_GAP = 25.0
 SEMANTIC_STRONG_FLOOR = 60.0
-SKILLS_ONLY_TYPES = {"skills", "skills_section", "skills-list"}
+SKILLS_ONLY_TYPES = {"skills", "skills_section", "skills-list", "skills_list"}
 
 # ---------------------------------------------------------------------------
 # Templates (MASTER_CONTEXT #16 / TEAMMATE_2 #17)

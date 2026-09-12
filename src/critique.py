@@ -135,7 +135,7 @@ def _skills_only_share(candidate: dict) -> tuple[int, int]:
         total += 1
         etype = str(entry.get("evidence_type") or "").lower()
         strength = float(entry.get("evidence_strength") or 0.0)
-        if etype in {"skills", "skills_section", "skills-list"} or strength <= SKILLS_ONLY_MAX_STRENGTH:
+        if etype in {"skills", "skills_section", "skills-list", "skills_list"} or strength <= SKILLS_ONLY_MAX_STRENGTH:
             listed_only += 1
     return listed_only, total
 

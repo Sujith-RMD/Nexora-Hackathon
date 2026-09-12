@@ -411,7 +411,7 @@ def test_no_network_capable_imports():
     banned = ("import requests", "import urllib", "import socket", "import http",
               "urllib.request", "http.client", "openai", "google.generativeai")
     for module in ("skill_graph", "critique", "overqualification", "probes",
-                   "team_mode", "counterfactual"):
+                   "team_mode", "counterfactual", "trust_pipeline"):
         source = (ROOT / "src" / f"{module}.py").read_text(encoding="utf-8")
         for needle in banned:
             assert needle not in source, f"{module}.py contains forbidden reference: {needle}"
@@ -477,6 +477,17 @@ def test_full_teammate2_pipeline_order():
 def main() -> int:
     tests = [(name, fn) for name, fn in sorted(globals().items())
              if name.startswith("test_") and callable(fn)]
+
+    # Cross-team integration tests (real T1 core + T2 trust layer). Imported
+    # here so a model/dependency failure degrades to a clear notice, not a
+    # crash of the unit suite.
+    try:
+        import test_teammate2_integration as _it
+        tests += [(name, fn) for name, fn in sorted(vars(_it).items())
+                  if name.startswith("test_") and callable(fn)]
+    except Exception as exc:  # pragma: no cover - environment-dependent
+        print(f"NOTE  integration tests unavailable: {exc}")
+
     failures = 0
     for name, fn in tests:
         try:

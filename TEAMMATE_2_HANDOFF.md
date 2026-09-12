@@ -1,9 +1,11 @@
 # TEAMMATE 2 — HANDOFF & ASSUMPTIONS LOG
 
-> Status: **all six owned modules complete** (29/29 tests green, stdlib-only,
-> no APIs). This file records the handoff message (TEAMMATE_2 #24), every
-> assumption made while the core pipeline was unavailable, and the exact
-> integration checklist. **Delete/merge this file after the team review.**
+> Status: **all six owned modules complete + INTEGRATED with Teammate 1's
+> core** (branch `teammate-1` merged in as files; 34/34 tests green including
+> real PDF end-to-end). The one-call entry point for Teammate 3 is
+> `src/trust_pipeline.run_trust_layer(jd, candidates, model=...)`.
+> This file records assumptions, the completed checklist, and remaining
+> team-level work. **Delete/merge after the team review.**
 
 ---
 
@@ -67,25 +69,40 @@ Docs left ranges open; these are the values chosen, all constants at module top:
    `reached_target`, `message`, `disclaimer`, `member_scores`,
    `runner_up_teams`, ...). Nothing was renamed.
 
-## 4. Integration checklist (when Teammate 1's core lands)
+## 4. Integration checklist (with Teammate 1's core) — ✅ DONE 2026-09-12
 
-1. Pipeline order: `parse → requirements → keyword/semantic/evidence →
-   **apply_skill_graph** → `score_candidate` → `rank_candidates` →
-   `critique_ranking` → per-candidate `flag_overqualification`,
-   `generate_interview_probes`, `generate_counterfactual`.
-2. **Rerun the scorer after graph enrichment** (TEAMMATE_2 #18) so
-   `scores.graph` feeds the 5% component before ranking.
-3. One-line swap for full fidelity:
-   `generate_counterfactual(cand, ranked, jd, scorer=score_candidate)`.
-4. Verify conventions against real parser output:
-   - `evidence_type` vocabulary (we accept `skills|skills_section|skills-list`,
-     `project(s)`, `experience`, `certification(s)`, `other`, `none`)
-   - `detected_skills` values match `config/skill_aliases.json` canonical names
-     used in `config/skill_graph.json` keys (all lowercase, e.g. `node.js`)
-   - `rank` is 1-based and `ranked_candidates` is rank-ordered (critique R4
-     relies on both).
-5. Confirm no double-counting complaint from Teammate 1: graph contribution
-   stays at the agreed 5%.
+Verified in `tests/test_teammate2_integration.py` against T1's real modules
+and real PDFs from `data/resumes/`:
+
+1. ✅ Pipeline order wired in `src/trust_pipeline.run_trust_layer`:
+   matchers → merge pass 1 (graph=0) → `apply_skill_graph` → real-scored pass
+   2 with graph component → `rank_candidates` → critique → overqualification →
+   probes → counterfactual → team mode.
+2. ✅ Graph feeds the 5% component before ranking (two-pass in
+   `score_with_graph`; T1's `score_candidate` accepts `graph_score` +
+   `graph_matches`, so their file was NOT modified — Rule 2 respected).
+3. ✅ Counterfactual now uses the REAL formula: `make_scorer_adapter(jd)`
+   rebuilds T1's aggregates from current `requirement_matches` and reuses
+   T1's `calculate_critical_missing_penalty`. Passed with
+   `scorer_backend == "injected-scorer"`.
+4. ✅ Conventions verified against real parser output:
+   - T1 emits `evidence_type = "skills_list"` (underscore) → my critique and
+     probes sets were **extended** to accept it (was a latent mismatch).
+   - Canonical skills (`react`, `node.js`, `mongodb`, `rest api`, `express`,
+     `docker`…) match `config/skill_graph.json` node names exactly.
+   - `rank` is 1-based and rank-ordered ✓.
+   - Counterfactual's baseline probe deep-copies before the scorer sees the
+     candidate (authoritative scores can never be mutated by simulation).
+5. ✅ Model `all-MiniLM-L6-v2` is cached locally; pipeline verified offline-
+   capable at runtime (one-time download already performed).
+
+### Found while integrating — FEED BACK TO TEAMMATE 1 (their module, not touched by us)
+- `extract_requirements` missed the cue line "Should have experience to
+  develop backend APIs" (no `rest api` requirement produced); rewording with
+  an explicit "REST API" token extracts correctly. Consider adding sentence-
+  cue → skill inference for API-type phrases.
+- T1's branch deleted `TEAMMATE_2/3_*.md` docs; we kept them on `teammate2`.
+- No `data/jd/*.pdf` sample JD exists yet.
 
 ## 5. Known limitations (honest list)
 
@@ -113,4 +130,5 @@ Docs left ranges open; these are the values chosen, all constants at module top:
 - [x] All outputs serializable (round-trip test in e2e pipeline test)
 - [x] No API calls (automated source audit test)
 - [x] Teammate 3 can render outputs from schema alone (field shapes asserted in tests)
-- [ ] Integration pass with real core (blocked until Teammate 1 merges — see #4)
+- [x] Integration pass with real core — DONE: T1 scorer/ranker + real PDFs
+      (5-resume smoke batch; recommend re-running over all 60 before demo)

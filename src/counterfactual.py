@@ -165,9 +165,14 @@ def _apply_change(candidate: dict, change: dict) -> dict:
 
 
 def _base_of(jd: dict, candidate: dict, scorer: Optional[Callable]) -> float:
-    """Base score under the chosen backend (real scorer if injected)."""
+    """Base score under the chosen backend (real scorer if injected).
+
+    The candidate is deep-copied before an injected scorer sees it: many real
+    scorers (including Teammate 1's) write results back in place, and a
+    simulation probe must never mutate the authoritative stored scores.
+    """
     if scorer is not None:
-        rescored = scorer(jd, candidate) or {}
+        rescored = scorer(jd, copy.deepcopy(candidate)) or {}
         if isinstance(rescored.get("scores"), dict):
             return _as_float(rescored["scores"].get("base_score"))
         return _as_float(rescored.get("base_score"))
